@@ -1,0 +1,105 @@
+﻿<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>AI 3D Interior Decorator</title>
+    <script type="importmap">
+    { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
+    </script>
+    <style>
+        body { margin: 0; background: #0b0b0f; color: white; font-family: sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+        .panel { width: 400px; background: #16161d; padding: 30px; border-radius: 20px; text-align: center; border: 1px solid #333; }
+        .dz { border: 2px dashed #46aaff; padding: 30px; border-radius: 12px; cursor: pointer; color: #46aaff; margin-bottom: 20px; }
+        .btn { background: #2973ff; color: white; border: none; padding: 15px; border-radius: 10px; width: 100%; cursor: pointer; font-weight: bold; }
+        .btn:disabled { background: #444; cursor: not-allowed; }
+        #status { margin: 15px 0; font-size: 14px; color: #aaa; min-height: 40px; }
+        #viewer { width: 100%; height: 320px; margin-top: 15px; display: none; background: #000; border-radius: 10px; border: 1px solid #333; }
+        .dl { display: none; margin-top: 15px; color: #00ff88; text-decoration: none; font-weight: bold; }
+    </style>
+</head>
+<body>
+<div class="panel">
+    <h3>AI 3D Decorator</h3>
+    <div class="dz" id="dz">Кликните, чтобы загрузить фото</div>
+    <input type="file" id="fi" hidden accept="image/*">
+    <div id="status">Выберите фото комнаты</div>
+    <button id="gb" class="btn" disabled>Создать 3D Объект</button>
+    <a id="db" class="dl">⬇ Скачать GLB модель</a>
+    <div id="viewer"></div>
+</div>
+
+<script type="module">
+    import * as THREE from 'three';
+    import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+    const fi = document.getElementById('fi'), dz = document.getElementById('dz'), gb = document.getElementById('gb'), 
+          st = document.getElementById('status'), db = document.getElementById('db'), vi = document.getElementById('viewer');
+
+    dz.onclick = () => fi.click();
+    fi.onchange = () => { if(fi.files[0]) { dz.innerText = fi.files[0].name; gb.disabled = false; } };
+
+    gb.onclick = async () => {
+        const fd = new FormData(); fd.append('image', fi.files[0]);
+        gb.disabled = true; st.innerText = "Анализ AI (нужен VPN)...";
+        vi.style.display = "none"; db.style.display = "none";
+
+        try {
+            const r = await fetch('/generate', { method: 'POST', body: fd });
+            if (!r.ok) throw new Error(await r.text());
+            const d = await r.json();
+            
+            st.innerText = `AI создал: ${d.object}`;
+            db.style.display = "block";
+            db.onclick = () => downloadModel(d.model, d.object);
+            vi.style.display = "block";
+            init3D(d.model);
+        } catch (e) {
+            st.innerText = "Ошибка: " + e.message;
+        } finally { gb.disabled = false; }
+    };
+
+    async function downloadModel(url, name) {
+        try {
+            const res = await fetch(`/download?url=${encodeURIComponent(url)}`);
+            if (!res.ok) throw new Error(await res.text());
+            const blob = await res.blob();
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = `${name}.glb`;
+            a.click();
+            URL.revokeObjectURL(a.href);
+        } catch (e) {
+            st.innerText = "Ошибка загрузки: " + e.message;
+        }
+    }
+
+    function init3D(url) {
+        const scene = new THREE.Scene();
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(vi.clientWidth, vi.clientHeight);
+        vi.innerHTML = ''; vi.appendChild(renderer.domElement);
+        
+        const cam = new THREE.PerspectiveCamera(45, vi.clientWidth/vi.clientHeight, 0.1, 100);
+        cam.position.set(2, 2, 2);
+        const controls = new OrbitControls(cam, renderer.domElement);
+        scene.add(new THREE.AmbientLight(0xffffff, 2));
+        scene.add(new THREE.DirectionalLight(0xffffff, 1));
+
+        new GLTFLoader().load(url, (gltf) => { 
+            scene.add(gltf.scene);
+            const box = new THREE.Box3().setFromObject(gltf.scene);
+            const center = box.getCenter(new THREE.Vector3());
+            gltf.scene.position.sub(center); // Центрируем объект
+        });
+
+        function anim() { 
+            requestAnimationFrame(anim); 
+            scene.rotation.y += 0.005; // Медленное вращение
+            renderer.render(scene, cam); 
+        }
+        anim();
+    }
+</script>
+</body>
+</html>
